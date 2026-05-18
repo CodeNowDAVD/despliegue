@@ -1,0 +1,133 @@
+COMANDOS DE DESPLIEGUE — GORBITS
+=================================
+
+Servidor Termux:
+  Usuario SSH: u0_a296
+  IP:          192.168.2.4
+  Puerto SSH:  8022
+
+URL local desde Mac:
+  Frontend + Nginx: http://192.168.2.4:8088
+  API health:       http://192.168.2.4:8088/api/actuator/health
+
+
+1) DESPLEGAR BACKEND GORBITS
+----------------------------
+
+Ruta fija del backend en Mac:
+  ~/Programacion/despliegueS/GOrbitS
+
+Comandos (equivalentes):
+
+  BACKEND_DIR=~/Programacion/despliegueS/GOrbitS ~/devops/gorbits/deploy-backend-to-termux.sh
+
+  # Mismo flujo desde el repo (Jenkins / CI):
+  cd ~/Programacion/despliegueS/GOrbitS
+  TERMUX_HOST=192.168.2.4 TERMUX_USER=u0_a296 TERMUX_PORT=8022 ./ci/deploy-to-termux.sh
+
+Qué hace:
+  - Copia el JAR a Termux:
+      ~/servers/gorbits/releases/GOrbitS-new.jar
+
+  - Copia migraciones SQL a Termux:
+      ~/servers/gorbits/database/migrations/
+
+  - Ejecuta en Termux:
+      ~/servers/gorbits/bin/deploy.sh ~/servers/gorbits/releases/GOrbitS-new.jar
+
+El deploy del backend realiza:
+  - backup de BD
+  - stop de GOrbitS
+  - aplica migraciones pendientes
+  - guarda rollback del JAR anterior
+  - reemplaza JAR activo
+  - start de GOrbitS
+  - health check
+  - cleanup
+
+
+2) DESPLEGAR FRONTEND GORBITSF
+------------------------------
+
+Ruta fija del build frontend en Mac:
+  ~/Programacion/despliegueS/GOrbitSF/dist/gorbitsf/browser
+
+Comandos:
+
+  tar -czf /tmp/frontend-new.tar.gz -C ~/Programacion/despliegueS/GOrbitSF/dist/gorbitsf/browser .
+
+  scp -P 8022 /tmp/frontend-new.tar.gz \
+    u0_a296@192.168.2.4:~/servers/gorbits-frontend/releases/frontend-new.tar.gz
+
+  ssh -p 8022 u0_a296@192.168.2.4 \
+    '~/servers/gorbits-frontend/bin/deploy.sh ~/servers/gorbits-frontend/releases/frontend-new.tar.gz'
+
+Comando en una sola línea:
+
+  tar -czf /tmp/frontend-new.tar.gz -C ~/Programacion/despliegueS/GOrbitSF/dist/gorbitsf/browser . && scp -P 8022 /tmp/frontend-new.tar.gz u0_a296@192.168.2.4:~/servers/gorbits-frontend/releases/frontend-new.tar.gz && ssh -p 8022 u0_a296@192.168.2.4 '~/servers/gorbits-frontend/bin/deploy.sh ~/servers/gorbits-frontend/releases/frontend-new.tar.gz'
+
+Qué hace:
+  - Empaqueta el build del frontend.
+  - Lo copia al servidor Termux.
+  - Ejecuta el deploy del frontend.
+  - Publica los archivos en:
+      ~/servers/gorbits-frontend/current/
+
+Nginx sirve:
+  /      -> frontend
+  /api/  -> backend GOrbitS
+
+
+3) VERIFICAR ESTADO GENERAL
+---------------------------
+
+Comando:
+
+  ssh -p 8022 u0_a296@192.168.2.4 '
+  echo "=== Backend ==="
+  ~/servers/gorbits/bin/status.sh
+
+  echo ""
+  echo "=== Frontend ==="
+  ~/servers/gorbits-frontend/bin/status.sh
+
+  echo ""
+  echo "=== Nginx ==="
+  ~/services/nginx/bin/status.sh
+  '
+
+
+4) ABRIR EN NAVEGADOR DESDE MAC
+-------------------------------
+
+Frontend:
+  http://192.168.2.4:8088
+
+API health:
+  http://192.168.2.4:8088/api/actuator/health
+
+
+5) NOTAS IMPORTANTES
+--------------------
+
+Backend entrega:
+  - target/GOrbitS-0.0.1-SNAPSHOT.jar
+  - database/migrations/*.sql
+  - database/env.required.example
+  - ENTREGA_BACKEND.md
+
+Frontend entrega:
+  - dist/gorbitsf/browser/
+  - env.required.example, si aplica
+  - ENTREGA_FRONTEND.md
+
+DevOps/servidor mantiene:
+  - deploy.sh
+  - start.sh / stop.sh / status.sh
+  - Nginx
+  - MariaDB
+  - backups
+  - rollback
+  - cleanup
+  - roles de base de datos
+

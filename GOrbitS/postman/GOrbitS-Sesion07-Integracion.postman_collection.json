@@ -1,0 +1,653 @@
+{
+  "info": {
+    "_postman_id": "gorbits-s07-integration",
+    "name": "GOrbitS — Sesión 07 Pruebas de Integración",
+    "description": "Colección alineada con Electivo I — Testing del Software, Sesión 07.\n\n**Flujo principal:** login JWT → referencia → stock → cliente → guía → cuotas → pago.\n**Reglas de negocio:** GuideLifecycleRules (401/403/404/409).\n\nEjecutar con el backend levantado y el entorno **GOrbitS Dev (H2)** o **GOrbitS Prod (MariaDB)** activo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "jwt", "value": "" },
+    { "key": "campaignId", "value": "" },
+    { "key": "bookId", "value": "" },
+    { "key": "clientId", "value": "" },
+    { "key": "guideId", "value": "" },
+    { "key": "installmentId", "value": "" },
+    { "key": "guideTotal", "value": "30" },
+    { "key": "firstInstallmentAmount", "value": "15" },
+    { "key": "contractNumber", "value": "700001" },
+    { "key": "invoiceNumber", "value": "FAC-POSTMAN-01" }
+  ],
+  "item": [
+    {
+      "name": "0 — Salud y autenticación",
+      "item": [
+        {
+          "name": "GET Health (actuator)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status UP', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.status).to.eql('UP');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login proveedor",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('contractNumber', String(Date.now()).slice(-6));",
+                  "pm.collectionVariables.set('invoiceNumber', 'FAC-' + Date.now());"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('accessToken presente', () => {",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.test('rol PROVEEDOR', () => pm.expect(body.role).to.eql('PROVEEDOR'));",
+                  "pm.collectionVariables.set('jwt', body.accessToken);",
+                  "pm.environment.set('jwt', body.accessToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"proveedor\",\n  \"password\": \"proveedor123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "GET Me (con JWT)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('username proveedor', () => {",
+                  "  pm.expect(pm.response.json().username).to.eql('proveedor');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Me (sin token → 401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 401 No autenticado', () => pm.response.to.have.status(401));",
+                  "pm.test('JSON error', () => {",
+                  "  pm.expect(pm.response.json().error).to.eql('No autenticado');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login credenciales inválidas",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"proveedor\",\n  \"password\": \"mal\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 401 o 403', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([401, 403]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1 — Referencia e inventario (stock)",
+      "item": [
+        {
+          "name": "GET Campañas",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": "{{baseUrl}}/api/v1/reference/campaigns"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const arr = pm.response.json();",
+                  "pm.test('Al menos una campaña', () => pm.expect(arr.length).to.be.above(0));",
+                  "pm.collectionVariables.set('campaignId', String(arr[0].id));",
+                  "if (pm.environment.name) pm.environment.set('campaignId', String(arr[0].id));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Libros (guardar UNITARIO)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": "{{baseUrl}}/api/v1/catalog/books"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const books = pm.response.json();",
+                  "pm.test('Catálogo no vacío', () => pm.expect(books.length).to.be.above(0));",
+                  "const unitario = books.find(b => b.bookType === 'UNITARIO') || books[0];",
+                  "pm.collectionVariables.set('bookId', String(unitario.id));",
+                  "pm.environment.set('bookId', String(unitario.id));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Factura librería (stock)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoiceNumber\": \"{{invoiceNumber}}\",\n  \"issuedOn\": \"2026-03-01\",\n  \"note\": \"Postman Sesión 07\",\n  \"lines\": [\n    { \"bookId\": {{bookId}}, \"quantity\": 50 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/inventory/library-invoices"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 201 Created', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 — Comercial (cliente y guía)",
+      "item": [
+        {
+          "name": "POST Cliente",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('clientPhone', '9' + String(Date.now()).slice(-8));"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const id = pm.response.json().id;",
+                  "pm.collectionVariables.set('clientId', String(id));",
+                  "if (pm.environment.name) pm.environment.set('clientId', String(id));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Cliente Postman S07\",\n  \"phone\": \"{{clientPhone}}\",\n  \"address\": null,\n  \"notes\": null\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/clients"
+          }
+        },
+        {
+          "name": "POST Guía (con stock)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"campaignId\": {{campaignId}},\n  \"clientId\": {{clientId}},\n  \"contractNumber\": \"{{contractNumber}}\",\n  \"orderDate\": \"2026-03-10\",\n  \"status\": \"ACTIVA\",\n  \"note\": null,\n  \"tagIds\": null,\n  \"lines\": [\n    { \"bookId\": {{bookId}}, \"quantity\": 2, \"unitPrice\": 15.00 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/guides"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const g = pm.response.json();",
+                  "pm.test('Líneas y total', () => {",
+                  "  pm.expect(g.lines[0].quantity).to.eql(2);",
+                  "  pm.expect(g.totalAmount).to.exist;",
+                  "});",
+                  "pm.collectionVariables.set('guideId', String(g.id));",
+                  "pm.environment.set('guideId', String(g.id));",
+                  "const total = g.totalAmount;",
+                  "pm.collectionVariables.set('guideTotal', String(total));",
+                  "pm.environment.set('guideTotal', String(total));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Guía por id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": "{{baseUrl}}/api/v1/guides/{{guideId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('contractNumber coincide', () => {",
+                  "  pm.expect(pm.response.json().contractNumber).to.eql(pm.collectionVariables.get('contractNumber'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Guía inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": "{{baseUrl}}/api/v1/guides/999999999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 — Cobranza (cuotas y pagos)",
+      "item": [
+        {
+          "name": "POST Plan cuotas custom",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"dueDate\": \"2026-04-01\", \"amount\": 15 },\n    { \"dueDate\": \"2026-05-01\", \"amount\": 15 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/guides/{{guideId}}/installments/plan/custom"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const total = Number(pm.environment.get('guideTotal') || pm.collectionVariables.get('guideTotal') || 30);",
+                  "const cuota1 = Math.round((total / 2) * 100) / 100;",
+                  "const cuota2 = Math.round((total - cuota1) * 100) / 100;",
+                  "pm.environment.set('firstInstallmentAmount', String(cuota1));",
+                  "pm.collectionVariables.set('firstInstallmentAmount', String(cuota1));",
+                  "pm.request.body.raw = JSON.stringify({",
+                  "  items: [",
+                  "    { dueDate: '2026-04-01', amount: cuota1 },",
+                  "    { dueDate: '2026-05-01', amount: cuota2 }",
+                  "  ]",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const list = pm.response.json();",
+                  "pm.test('Al menos 1 cuota', () => pm.expect(list.length).to.be.above(0));",
+                  "const id = list[0].id;",
+                  "pm.collectionVariables.set('installmentId', String(id));",
+                  "pm.environment.set('installmentId', String(id));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Cuotas de la guía",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": "{{baseUrl}}/api/v1/guides/{{guideId}}/installments"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const inst = pm.response.json()[0];",
+                  "pm.collectionVariables.set('installmentId', String(inst.id));",
+                  "pm.environment.set('installmentId', String(inst.id));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Calendario cobranza (abril)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/billing/calendar?from=2026-04-01&to=2026-04-30",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "billing", "calendar"],
+              "query": [
+                { "key": "from", "value": "2026-04-01" },
+                { "key": "to", "value": "2026-04-30" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Hay pendientes en abril', () => {",
+                  "  const arr = pm.response.json();",
+                  "  pm.expect(arr.length).to.be.above(0);",
+                  "  pm.expect(arr[0].pendingCount).to.be.above(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Pago cuota",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{firstInstallmentAmount}},\n  \"paidOn\": \"2026-04-01\",\n  \"note\": \"Pago Postman S07\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/installments/{{installmentId}}/payments"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Cuota pagada', () => {",
+                  "  pm.expect(pm.response.json().installment.fullyPaid).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Resumen billing",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": "{{baseUrl}}/api/v1/billing/summary"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('totalPending numérico', () => {",
+                  "  pm.expect(pm.response.json().totalPending).to.be.a('number');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 — GuideLifecycleRules",
+      "item": [
+        {
+          "name": "PATCH status DEVUELTA directo → error",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"DEVUELTA\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/guides/{{guideId}}/status"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 4xx (regla ciclo de vida)', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([400, 409, 422]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Devolución cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Devolución Postman S07\",\n  \"returnedAt\": null,\n  \"restoreStockToField\": false,\n  \"hideFromReturnList\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/guides/{{guideId}}/client-return"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Pago tras devolución → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5.00,\n  \"paidOn\": \"2026-04-01\",\n  \"note\": null\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/installments/{{installmentId}}/payments"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 409 Conflict', () => pm.response.to.have.status(409));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 — Autorización por rol",
+      "item": [
+        {
+          "name": "Login admin",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('jwtAdmin', pm.response.json().accessToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Clientes como admin → 403",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwtAdmin}}" }],
+            "url": "{{baseUrl}}/api/v1/clients"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
