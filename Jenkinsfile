@@ -29,6 +29,7 @@ pipeline {
     parameters {
         booleanParam(name: 'DEPLOY_TO_SERVER', defaultValue: false, description: 'Si true, copia JAR + migraciones por SSH y reinicia el servicio')
         booleanParam(name: 'RUN_TESTCONTAINERS', defaultValue: false, description: 'Si true, ejecuta tests @Tag(testcontainers) (requiere Docker en el agente Jenkins)')
+        booleanParam(name: 'SKIP_QUALITY_GATE', defaultValue: false, description: 'Si true, no espera Quality Gate (útil en el primer build sin webhook Sonar→Jenkins)')
     }
 
     environment {
@@ -114,6 +115,9 @@ pipeline {
         }
 
         stage('Quality Gate') {
+            when {
+                expression { !params.SKIP_QUALITY_GATE }
+            }
             steps {
                 sleep(time: 10, unit: 'SECONDS')
                 timeout(time: 5, unit: 'MINUTES') {
