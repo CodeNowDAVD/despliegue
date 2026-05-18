@@ -21,11 +21,6 @@
 pipeline {
     agent any
 
-    tools {
-        maven 'MAVEN_HOME'
-        jdk 'JDK21'
-    }
-
     parameters {
         booleanParam(name: 'DEPLOY_TO_SERVER', defaultValue: false, description: 'Si true, copia JAR + migraciones por SSH y reinicia el servicio')
         booleanParam(name: 'RUN_TESTCONTAINERS', defaultValue: false, description: 'Si true, ejecuta tests @Tag(testcontainers) (requiere Docker en el agente Jenkins)')
@@ -63,8 +58,18 @@ pipeline {
 
         stage('Build') {
             steps {
-                timeout(time: 10, unit: 'MINUTES') {
-                    sh "mvn -f ${POM_PATH} clean package -DskipTests"
+                script {
+                    def jdk21 = tool name: 'JDK21', type: 'jdk'
+                    withEnv(["JAVA_HOME=${jdk21}", "PATH=${jdk21}/bin:${env.PATH}"]) {
+                        timeout(time: 10, unit: 'MINUTES') {
+                            sh '''
+                                echo "JAVA_HOME=$JAVA_HOME"
+                                java -version
+                                javac -version
+                                cd GOrbitS && chmod +x mvnw && ./mvnw -B clean package -DskipTests
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -77,10 +82,15 @@ pipeline {
                 TESTCONTAINERS_HOST_OVERRIDE  = 'host.docker.internal'
             }
             steps {
-                timeout(time: 15, unit: 'MINUTES') {
-                    script {
-                        def tcFlag = params.RUN_TESTCONTAINERS ? '-DexcludedGroups=' : ''
-                        sh "mvn -f ${POM_PATH} clean verify ${tcFlag}"
+                script {
+                    def jdk21 = tool name: 'JDK21', type: 'jdk'
+                    def tcFlag = params.RUN_TESTCONTAINERS ? '-DexcludedGroups=' : ''
+                    withEnv(["JAVA_HOME=${jdk21}", "PATH=${jdk21}/bin:${env.PATH}"]) {
+                        timeout(time: 15, unit: 'MINUTES') {
+                            sh """
+                                cd GOrbitS && chmod +x mvnw && ./mvnw -B clean verify ${tcFlag}
+                            """
+                        }
                     }
                 }
             }
@@ -102,13 +112,18 @@ pipeline {
 
         stage('Sonar') {
             steps {
-                timeout(time: 6, unit: 'MINUTES') {
-                    withSonarQubeEnv('sonarqube') {
-                        sh """
-                            mvn -f ${POM_PATH} org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
-                                -Dsonar.token=${SONAR_TOKEN} \
-                                -Dsonar.host.url=${SONAR_HOST_URL}
-                        """
+                script {
+                    def jdk21 = tool name: 'JDK21', type: 'jdk'
+                    withEnv(["JAVA_HOME=${jdk21}", "PATH=${jdk21}/bin:${env.PATH}"]) {
+                        timeout(time: 6, unit: 'MINUTES') {
+                            withSonarQubeEnv('sonarqube') {
+                                sh """
+                                    cd GOrbitS && chmod +x mvnw && ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
+                                        -Dsonar.token=${SONAR_TOKEN} \
+                                        -Dsonar.host.url=${SONAR_HOST_URL}
+                                """
+                            }
+                        }
                     }
                 }
             }
