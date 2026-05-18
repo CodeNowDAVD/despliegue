@@ -20,7 +20,7 @@ pipeline {
         booleanParam(name: 'RUN_TESTCONTAINERS', defaultValue: false,
             description: 'Tests @Tag(testcontainers); requiere Docker en el agente Jenkins')
         booleanParam(name: 'SKIP_QUALITY_GATE', defaultValue: false,
-            description: 'Si true, omite waitForQualityGate (solo si el webhook Sonar→Jenkins no está listo)')
+            description: 'Si true, no espera Quality Gate (-Dsonar.qualitygate.wait)')
     }
 
     environment {
@@ -100,18 +100,13 @@ pipeline {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
                     script {
-                        // withSonarQubeEnv es obligatorio para waitForQualityGate
+                        // Maven espera el Quality Gate en el scanner (más fiable que waitForQualityGate en Jenkins)
+                        def qgWait = params.SKIP_QUALITY_GATE ? '' : '-Dsonar.qualitygate.wait=true'
                         withSonarQubeEnv('sonarqube') {
-                            sh '''
+                            sh """
                                 cd GOrbitS && chmod +x mvnw
-                                ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar
-                            '''
-                            if (!params.SKIP_QUALITY_GATE) {
-                                sleep(time: 15, unit: 'SECONDS')
-                                timeout(time: 5, unit: 'MINUTES') {
-                                    waitForQualityGate abortPipeline: true
-                                }
-                            }
+                                ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar ${qgWait}
+                            """
                         }
                     }
                 }
