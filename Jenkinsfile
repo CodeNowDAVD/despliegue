@@ -97,14 +97,7 @@ pipeline {
                 always {
                     junit allowEmptyResults: true,
                           testResults: 'GOrbitS/target/surefire-reports/*.xml'
-                    publishHTML(target: [
-                        allowMissing         : true,
-                        alwaysLinkToLastBuild: true,
-                        keepAll              : true,
-                        reportDir            : 'GOrbitS/target/site/jacoco',
-                        reportFiles          : 'index.html',
-                        reportName           : 'JaCoCo GOrbitS'
-                    ])
+                    // JaCoCo HTML: ver artefacto GOrbitS/target/site/jacoco/ o instalar plugin "HTML Publisher"
                 }
             }
         }
