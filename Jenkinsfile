@@ -127,13 +127,18 @@ pipeline {
                         keyFileVariable: 'SSH_KEY_FILE',
                         usernameVariable: 'SSH_DEPLOY_USER')]) {
                         sh """
-                            chmod +x GOrbitS/ci/deploy-to-termux.sh
+                            chmod +x GOrbitS/ci/deploy-to-termux.sh GOrbitS/ci/deploy-via-host-network.sh
                             export SSH_KEY_FILE="\${SSH_KEY_FILE}"
                             export BACKEND_DIR='${BACKEND_DIR}'
                             export TERMUX_USER="\${SSH_DEPLOY_USER:-${DEPLOY_USER}}"
                             export TERMUX_HOST='${DEPLOY_HOST}'
                             export TERMUX_PORT='${DEPLOY_SSH_PORT}'
-                            GOrbitS/ci/deploy-to-termux.sh
+                            # En Mac: antes del build ejecutar ./scripts/termux-ssh-tunnel.sh
+                            if [ -f /.dockerenv ]; then
+                              export JENKINS_DEPLOY_HOST=host.docker.internal
+                              export JENKINS_DEPLOY_PORT=28022
+                            fi
+                            GOrbitS/ci/deploy-via-host-network.sh
                         """
                     }
                 }
