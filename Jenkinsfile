@@ -24,7 +24,7 @@ pipeline {
     parameters {
         booleanParam(name: 'DEPLOY_TO_SERVER', defaultValue: false, description: 'Si true, copia JAR + migraciones por SSH y reinicia el servicio')
         booleanParam(name: 'RUN_TESTCONTAINERS', defaultValue: false, description: 'Si true, ejecuta tests @Tag(testcontainers) (requiere Docker en el agente Jenkins)')
-        booleanParam(name: 'SKIP_QUALITY_GATE', defaultValue: false, description: 'Si true, no espera Quality Gate (útil en el primer build sin webhook Sonar→Jenkins)')
+        booleanParam(name: 'SKIP_QUALITY_GATE', defaultValue: true, description: 'Si true, no espera Quality Gate (recomendado hasta configurar webhook Sonar→Jenkins)')
     }
 
     environment {
@@ -104,13 +104,14 @@ pipeline {
 
         stage('Sonar') {
             steps {
-                timeout(time: 6, unit: 'MINUTES') {
+                timeout(time: 8, unit: 'MINUTES') {
                     withSonarQubeEnv('sonarqube') {
-                        sh """
-                            cd GOrbitS && chmod +x mvnw && ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
-                                -Dsonar.token=${SONAR_TOKEN} \
-                                -Dsonar.host.url=${SONAR_HOST_URL}
-                        """
+                        sh '''
+                            cd GOrbitS && chmod +x mvnw
+                            ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
+                                -Dsonar.token="${SONAR_TOKEN}" \
+                                -Dsonar.host.url="${SONAR_HOST_URL}"
+                        '''
                     }
                 }
             }
