@@ -34,7 +34,8 @@ pipeline {
         JAR_FILE       = 'GOrbitS/target/GOrbitS-0.0.1-SNAPSHOT.jar'
         MIGRATIONS_DIR = 'GOrbitS/database/migrations'
 
-        SONAR_HOST_URL = "${env.SONAR_HOST_URL ?: 'http://sonarqube:9000'}"
+        // Desde el contenedor Jenkins: hostname «sonarqube» (red Docker), NO localhost:9000
+        SONAR_HOST_URL = 'http://sonarqube:9000'
         DEPLOY_HOST    = "${env.DEPLOY_HOST ?: ''}"
         DEPLOY_USER    = "${env.DEPLOY_USER ?: 'u0_a296'}"
         DEPLOY_SSH_PORT = "${env.DEPLOY_SSH_PORT ?: '8022'}"
@@ -105,14 +106,12 @@ pipeline {
         stage('Sonar') {
             steps {
                 timeout(time: 8, unit: 'MINUTES') {
-                    withSonarQubeEnv('sonarqube') {
-                        sh '''
-                            cd GOrbitS && chmod +x mvnw
-                            ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
-                                -Dsonar.token="${SONAR_TOKEN}" \
-                                -Dsonar.host.url="${SONAR_HOST_URL}"
-                        '''
-                    }
+                    sh '''
+                        cd GOrbitS && chmod +x mvnw
+                        ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
+                            -Dsonar.token="${SONAR_TOKEN}" \
+                            -Dsonar.host.url=http://sonarqube:9000
+                    '''
                 }
             }
         }
