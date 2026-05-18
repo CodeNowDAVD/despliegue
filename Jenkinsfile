@@ -1,45 +1,37 @@
 /**
- * Pipeline CI/CD — GOrbitS (Spring Boot JAR, sin Tomcat).
+ * Pipeline CI/CD — GOrbitS (Spring Boot JAR → Termux, sin Tomcat).
  *
- * Stages: Clone → Build → Test (+ JaCoCo) → Sonar → Quality Gate → Deploy (SSH a vuestro servidor).
+ * Credenciales Jenkins:
+ *   - github-token  → clone (opcional si el job ya usa SCM)
+ *   - Sonarqube     → token SonarQube
+ *   - gorbits-ssh   → clave SSH deploy (usuario Termux)
  *
- * Credenciales Jenkins (sugeridas):
- *   - github-token     → Git clone
- *   - Sonarqube        → token SonarQube
- *   - gorbits-ssh      → SSH private key para deploy (usuario con permiso en el servidor)
+ * Variables globales en Jenkins (Manage Jenkins → System):
+ *   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_PORT
  *
- * Variables de entorno del job (configurar en Jenkins):
- *   - GIT_REPO_URL     → ej. https://github.com/TU_USUARIO/despliegueS.git
- *   - SONAR_HOST_URL   → http://sonarqube:9000 (red Docker) o http://host.docker.internal:9001
- *   - DEPLOY_HOST      → IP Termux (ej. 192.168.2.4)
- *   - DEPLOY_USER      → usuario SSH Termux (ej. u0_a296)
- *   - DEPLOY_SSH_PORT  → puerto SSH Termux (default 8022)
- *
- * Deploy: copia JAR + migraciones y ejecuta ~/servers/gorbits/bin/deploy.sh en Termux.
- * Ver despliegueS/comandos_despliegue_gorbits.txt
+ * Setup completo: ./scripts/sesion08-finish-setup.sh
  */
 pipeline {
     agent any
 
     parameters {
-        booleanParam(name: 'DEPLOY_TO_SERVER', defaultValue: false, description: 'Si true, copia JAR + migraciones por SSH y reinicia el servicio')
-        booleanParam(name: 'RUN_TESTCONTAINERS', defaultValue: false, description: 'Si true, ejecuta tests @Tag(testcontainers) (requiere Docker en el agente Jenkins)')
-        booleanParam(name: 'SKIP_QUALITY_GATE', defaultValue: true, description: 'Si true, no espera Quality Gate (recomendado hasta configurar webhook Sonar→Jenkins)')
+        booleanParam(name: 'DEPLOY_TO_SERVER', defaultValue: false,
+            description: 'Si true, copia JAR + migraciones por SSH y reinicia el servicio')
+        booleanParam(name: 'RUN_TESTCONTAINERS', defaultValue: false,
+            description: 'Tests @Tag(testcontainers); requiere Docker en el agente Jenkins')
+        booleanParam(name: 'SKIP_QUALITY_GATE', defaultValue: false,
+            description: 'Si true, omite waitForQualityGate (solo si el webhook Sonar→Jenkins no está listo)')
     }
 
     environment {
-        SONAR_TOKEN  = credentials('Sonarqube')
-
-        POM_PATH       = 'GOrbitS/pom.xml'
-        JAR_FILE       = 'GOrbitS/target/GOrbitS-0.0.1-SNAPSHOT.jar'
-        MIGRATIONS_DIR = 'GOrbitS/database/migrations'
-
-        // Desde el contenedor Jenkins: hostname «sonarqube» (red Docker), NO localhost:9000
-        SONAR_HOST_URL = 'http://sonarqube:9000'
-        DEPLOY_HOST    = "${env.DEPLOY_HOST ?: ''}"
-        DEPLOY_USER    = "${env.DEPLOY_USER ?: 'u0_a296'}"
+        SONAR_TOKEN     = credentials('Sonarqube')
+        GIT_REPO_URL    = "${env.GIT_REPO_URL ?: 'https://github.com/CodeNowDAVD/despliegue.git'}"
+        DEPLOY_HOST     = "${env.DEPLOY_HOST ?: '192.168.2.4'}"
+        DEPLOY_USER     = "${env.DEPLOY_USER ?: 'u0_a296'}"
         DEPLOY_SSH_PORT = "${env.DEPLOY_SSH_PORT ?: '8022'}"
-        BACKEND_DIR    = "${WORKSPACE}/GOrbitS"
+        POM_PATH        = 'GOrbitS/pom.xml'
+        JAR_FILE        = 'GOrbitS/target/GOrbitS-0.0.1-SNAPSHOT.jar'
+        BACKEND_DIR     = "${WORKSPACE}/GOrbitS"
     }
 
     stages {
@@ -60,11 +52,13 @@ pipeline {
         stage('Check Java 21') {
             steps {
                 sh '''
-                    echo "JAVA_HOME=${JAVA_HOME:-<no definido>}"
                     java -version 2>&1 | tee /dev/stderr
-                    javac -version 2>&1 | tee /dev/stderr
                     java -version 2>&1 | grep -qE 'version "21\\.' || {
-                      echo "ERROR: Jenkins debe usar Java 21. Ejecuta: ./scripts/sesion08-jenkins-jdk21-rebuild.sh"
+                      echo "ERROR: Jenkins necesita JDK 21. Ejecuta: ./scripts/sesion08-jenkins-rebuild.sh"
+                      exit 1
+                    }
+                    command -v ssh >/dev/null || {
+                      echo "ERROR: falta openssh-client en la imagen Jenkins. Ejecuta: ./scripts/sesion08-jenkins-rebuild.sh"
                       exit 1
                     }
                 '''
@@ -98,32 +92,28 @@ pipeline {
                 always {
                     junit allowEmptyResults: true,
                           testResults: 'GOrbitS/target/surefire-reports/*.xml'
-                    // JaCoCo HTML: ver artefacto GOrbitS/target/site/jacoco/ o instalar plugin "HTML Publisher"
                 }
             }
         }
 
-        stage('Sonar') {
+        stage('Sonar & Quality Gate') {
             steps {
-                timeout(time: 8, unit: 'MINUTES') {
-                    sh '''
-                        cd GOrbitS && chmod +x mvnw
-                        ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
-                            -Dsonar.token="${SONAR_TOKEN}" \
-                            -Dsonar.host.url=http://sonarqube:9000
-                    '''
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            when {
-                expression { !params.SKIP_QUALITY_GATE }
-            }
-            steps {
-                sleep(time: 10, unit: 'SECONDS')
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                timeout(time: 10, unit: 'MINUTES') {
+                    script {
+                        // withSonarQubeEnv es obligatorio para waitForQualityGate
+                        withSonarQubeEnv('sonarqube') {
+                            sh '''
+                                cd GOrbitS && chmod +x mvnw
+                                ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar
+                            '''
+                            if (!params.SKIP_QUALITY_GATE) {
+                                sleep(time: 15, unit: 'SECONDS')
+                                timeout(time: 5, unit: 'MINUTES') {
+                                    waitForQualityGate abortPipeline: true
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -137,16 +127,30 @@ pipeline {
             }
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
-                    sshagent(credentials: ['gorbits-ssh']) {
+                    withCredentials([sshUserPrivateKey(
+                        credentialsId: 'gorbits-ssh',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_DEPLOY_USER')]) {
                         sh """
                             chmod +x GOrbitS/ci/deploy-to-termux.sh
-                            BACKEND_DIR='${BACKEND_DIR}' \\
-                            TERMUX_USER='${DEPLOY_USER}' \\
-                            TERMUX_HOST='${DEPLOY_HOST}' \\
-                            TERMUX_PORT='${DEPLOY_SSH_PORT}' \\
+                            export SSH_KEY_FILE="\${SSH_KEY_FILE}"
+                            export BACKEND_DIR='${BACKEND_DIR}'
+                            export TERMUX_USER="\${SSH_DEPLOY_USER:-${DEPLOY_USER}}"
+                            export TERMUX_HOST='${DEPLOY_HOST}'
+                            export TERMUX_PORT='${DEPLOY_SSH_PORT}'
                             GOrbitS/ci/deploy-to-termux.sh
                         """
                     }
+                }
+            }
+            post {
+                success {
+                    sh """
+                        sleep 5
+                        curl -sf --connect-timeout 15 \\
+                            "http://${DEPLOY_HOST}:8088/api/actuator/health" \\
+                            || echo "AVISO: health no respondió (¿Nginx/GOrbitS arrancando?)"
+                    """
                 }
             }
         }
@@ -156,18 +160,18 @@ pipeline {
         success {
             script {
                 if (params.DEPLOY_TO_SERVER && env.DEPLOY_HOST?.trim()) {
-                    echo "Deploy OK → http://${DEPLOY_HOST}:8088/api/actuator/health (Nginx → GOrbitS)"
+                    echo "Deploy OK → http://${DEPLOY_HOST}:8088/api/actuator/health"
                 } else {
                     echo "Pipeline OK — artefacto: ${JAR_FILE}"
                 }
             }
         }
         failure {
-            echo 'Pipeline falló — revisar Test, Sonar Quality Gate o Deploy en la consola Jenkins.'
+            echo 'Pipeline falló — revisar consola: Test, Sonar Quality Gate o Deploy SSH.'
         }
         always {
-            archiveArtifacts artifacts: 'GOrbitS/target/*.jar,GOrbitS/target/site/jacoco/**', allowEmptyArchive: true
-            cleanWs()
+            archiveArtifacts artifacts: 'GOrbitS/target/*.jar,GOrbitS/target/site/jacoco/**',
+                              allowEmptyArchive: true
         }
     }
 }
