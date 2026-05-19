@@ -1,7 +1,7 @@
 # Sesión 08 — CI/CD completo (GOrbitS)
 
 Electivo I — Testing del Software.  
-Stack: **Docker** + **Jenkins** + **SonarQube** + **GitHub** + deploy **Termux** (`deploy.sh`).
+Stack: **Docker** + **Jenkins** + **SonarQube** + deploy **HTTP** → `https://app.gorbits.xyz/deploy` (Bearer token, como Tomcat Manager pero con JAR).
 
 Checklist imprimible al final de este documento.
 
@@ -16,11 +16,12 @@ Checklist imprimible al final de este documento.
 | 3 | Jenkins :9080 | Mismo script + UI Jenkins |
 | 4 | Pipeline Maven (build, test, JaCoCo) | `Jenkinsfile` |
 | 5 | Sonar + Quality Gate | Stages Sonar en `Jenkinsfile` |
-| 6 | Deploy continuo | Stage Deploy → `ci/deploy-to-termux.sh` |
+| 6 | Deploy continuo HTTP | Stage Deploy → `ci/deploy-http-gorbits.sh` |
 | 7 | GitHub (token / Actions) | Credencial Jenkins + `.github/workflows/gorbits-ci.yml` |
 | 8 | Evidencias | Capturas Jenkins, Sonar, health API |
 
-Deploy manual a Termux (ya lo tienes funcionando): `comandos_despliegue_gorbits.txt`.
+Documentación deploy: `~/Documents/documentacion_deploy_gorbits.txt` (o copia en repo).  
+Script manual: `GOrbitS/ci/deploy-http-gorbits.sh`
 
 ---
 
@@ -29,14 +30,8 @@ Deploy manual a Termux (ya lo tienes funcionando): `comandos_despliegue_gorbits.
 - Docker Desktop en marcha
 - Java 21 (`java -version`)
 - Repo en GitHub (para clone Jenkins y webhook)
-- Termux con GOrbitS, MariaDB, Nginx (`192.168.2.4:8022`)
-
-**SSH sin contraseña** (evita el prompt en deploy):
-
-```bash
-chmod +x GOrbitS/ci/setup-ssh-termux.sh
-./GOrbitS/ci/setup-ssh-termux.sh
-```
+- Token de deploy del servidor (para Jenkins credencial `gorbits-deploy-token`)
+- Servidor publicado en `https://app.gorbits.xyz`
 
 ---
 
@@ -120,7 +115,7 @@ Reiniciar Jenkins si lo pide.
 |----|------|-----|
 | `github-token` | Username + Password | Usuario GitHub + **Personal Access Token** (scope `repo`) |
 | `Sonarqube` | Secret text | Token generado en Sonar |
-| `gorbits-ssh` | SSH Username with private key | Usuario `u0_a296` + clave privada (`~/.ssh/id_ed25519`) |
+| `gorbits-deploy-token` | Secret text | Token Bearer para `POST https://app.gorbits.xyz/deploy` |
 
 ---
 
@@ -140,9 +135,8 @@ Reiniciar Jenkins si lo pide.
 |----------|----------------|
 | `GIT_REPO_URL` | misma URL del repo |
 | `SONAR_HOST_URL` | `http://sonarqube:9000` |
-| `DEPLOY_HOST` | `192.168.2.4` |
-| `DEPLOY_USER` | `u0_a296` |
-| `DEPLOY_SSH_PORT` | `8022` |
+| `DEPLOY_URL` | `https://app.gorbits.xyz/deploy` |
+| `HEALTH_URL` | `https://app.gorbits.xyz/api/actuator/health` |
 
 ---
 
@@ -171,21 +165,42 @@ chmod +x GOrbitS/ci/run-sonar-local.sh
 
 ---
 
-## Fase 7 — Deploy automático a Termux
+## Fase 7 — Deploy HTTP (GOrbitS Deploy Receiver)
 
-1. Credencial `gorbits-ssh` con la misma clave que `setup-ssh-termux.sh`
-2. Mac y Termux en la **misma Wi‑Fi** (`192.168.2.4` accesible desde el host Docker)
-3. Build con `DEPLOY_TO_SERVER` = **true**
+Equivalente a Tomcat Manager, pero con JAR:
 
-Si Jenkins no alcanza Termux, prueba en el job:
+| Tomcat (guía) | GOrbitS (tu servidor) |
+|---------------|------------------------|
+| `POST /manager/text/deploy` | `POST https://app.gorbits.xyz/deploy` |
+| Usuario/contraseña | `Authorization: Bearer TOKEN` |
+| Campo `.war` | Campo multipart `file` con `.jar` |
 
-`DEPLOY_HOST` = IP del Mac en la LAN y reenvío SSH, o ejecuta deploy manual:
+1. En Jenkins → Credentials → **gorbits-deploy-token** (Secret text) con el token real.
+2. Build con **DEPLOY_TO_SERVER** = **true**
+3. El stage sube `GOrbitS-0.0.1-SNAPSHOT.jar` y valida `Deploy OK` + health.
+
+Prueba manual desde Mac:
 
 ```bash
-cd GOrbitS && ./ci/deploy-to-termux.sh
+cd GOrbitS
+export DEPLOY_TOKEN="tu_token"
+./ci/deploy-http-gorbits.sh
 ```
 
-Health: http://192.168.2.4:8088/api/actuator/health
+O con curl:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer TU_TOKEN" \
+  -F "file=@target/GOrbitS-0.0.1-SNAPSHOT.jar" \
+  https://app.gorbits.xyz/deploy
+```
+
+Health:
+
+```bash
+curl https://app.gorbits.xyz/api/actuator/health
+```
 
 ---
 
@@ -233,12 +248,11 @@ GitHub → repo → Settings → Webhooks →
 ```
 [ ] docker network + sonar + jenkins (sesion08-docker-up.sh)
 [ ] Jenkins plugins + JDK21 + Maven
-[ ] Credenciales github-token, Sonarqube, gorbits-ssh
+[ ] Credenciales github-token, Sonarqube, gorbits-deploy-token
 [ ] Sonar server «sonarqube» en Jenkins
 [ ] Job pipeline from SCM → Jenkinsfile
 [ ] Build 1: DEPLOY_TO_SERVER=false → verde hasta Quality Gate
-[ ] SSH sin password (setup-ssh-termux.sh)
-[ ] Build 2: DEPLOY_TO_SERVER=true → health UP
+[ ] Build 2: DEPLOY_TO_SERVER=true → Deploy OK + health UP
 [ ] Repo en GitHub + workflow Actions
 [ ] Capturas para entrega
 ```
@@ -250,8 +264,7 @@ GitHub → repo → Settings → Webhooks →
 | Archivo | Rol |
 |---------|-----|
 | `../Jenkinsfile` | Pipeline Jenkins |
-| `ci/deploy-to-termux.sh` | Deploy Termux |
-| `ci/setup-ssh-termux.sh` | Clave SSH |
+| `ci/deploy-http-gorbits.sh` | Deploy HTTP → app.gorbits.xyz/deploy |
 | `ci/run-sonar-local.sh` | Sonar desde Mac |
 | `../scripts/sesion08-docker-up.sh` | Levantar Docker |
 | `../.github/workflows/gorbits-ci.yml` | CI GitHub |
