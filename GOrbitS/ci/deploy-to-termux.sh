@@ -26,14 +26,14 @@ REMOTE_JAR="${REMOTE_RELEASES}/GOrbitS-new.jar"
 REMOTE_DEPLOY_SCRIPT="${REMOTE_BASE}/bin/deploy.sh"
 
 # accept-new: evita "Host key verification failed" en Jenkins/Docker (host.docker.internal)
-SSH_OPTS=(-p "${TERMUX_PORT}" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes)
+SSH_COMMON=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes)
 if [[ -n "${SSH_KEY_FILE:-}" && -f "${SSH_KEY_FILE}" ]]; then
-  SSH_OPTS+=(-i "${SSH_KEY_FILE}")
+  SSH_COMMON+=(-i "${SSH_KEY_FILE}")
   chmod 600 "${SSH_KEY_FILE}" 2>/dev/null || true
 fi
 
-SSH=(ssh "${SSH_OPTS[@]}" "${TERMUX_USER}@${TERMUX_HOST}")
-SCP=(scp "${SSH_OPTS[@]}")
+SSH=(ssh -p "${TERMUX_PORT}" "${SSH_COMMON[@]}" "${TERMUX_USER}@${TERMUX_HOST}")
+SCP=(scp -P "${TERMUX_PORT}" "${SSH_COMMON[@]}")
 
 echo "======================================"
 echo " DEPLOY GORBITS BACKEND → TERMUX"
