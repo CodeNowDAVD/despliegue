@@ -25,8 +25,15 @@ REMOTE_MIGRATIONS="${REMOTE_BASE}/database/migrations"
 REMOTE_JAR="${REMOTE_RELEASES}/GOrbitS-new.jar"
 REMOTE_DEPLOY_SCRIPT="${REMOTE_BASE}/bin/deploy.sh"
 
-SSH=(ssh -p "${TERMUX_PORT}" "${TERMUX_USER}@${TERMUX_HOST}")
-SCP=(scp -P "${TERMUX_PORT}")
+# accept-new: evita "Host key verification failed" en Jenkins/Docker (host.docker.internal)
+SSH_OPTS=(-p "${TERMUX_PORT}" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o BatchMode=yes)
+if [[ -n "${SSH_KEY_FILE:-}" && -f "${SSH_KEY_FILE}" ]]; then
+  SSH_OPTS+=(-i "${SSH_KEY_FILE}")
+  chmod 600 "${SSH_KEY_FILE}" 2>/dev/null || true
+fi
+
+SSH=(ssh "${SSH_OPTS[@]}" "${TERMUX_USER}@${TERMUX_HOST}")
+SCP=(scp "${SSH_OPTS[@]}")
 
 echo "======================================"
 echo " DEPLOY GORBITS BACKEND → TERMUX"
